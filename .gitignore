@@ -1,6 +1,7 @@
 node_modules
 .env
-
+seriesA.json
+seriesB.json
 # Hardhat files
 /cache
 /artifacts
