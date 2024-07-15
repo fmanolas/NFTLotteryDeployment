@@ -16,7 +16,12 @@ module.exports = {
     hardhat: {},
     baseSepolia: {
       url: process.env.ALCHEMY_API_KEY,
-      accounts: [process.env.PRIVATE_KEY]
+      accounts: [process.env.PRIVATE_KEY],
+      chainid:84532
     },
-  }
+  },
+  etherscan: {
+    url:process.env.ALCHEMY_API_KEY,
+    apiKey: process.env.BASE_ETHERSCAN_API_KEY, // Use the correct Etherscan-like service API key for Base Sepolia
+  },
 };

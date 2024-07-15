@@ -2,7 +2,7 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
 describe("NFTLottery", function () {
-    let NFTLottery, nftLottery, biaToken, nftContract;
+    let NFTLottery, nftLottery, NFTLotteryStorage, nftLotteryStorage, biaToken, nftContract;
     let owner, addr1, addr2;
     const seriesANFTs = [
         { id: 0, rarityScore: 10000, series: "A" },
@@ -28,23 +28,38 @@ describe("NFTLottery", function () {
         nftContract = await MockERC721.deploy();
         await nftContract.waitForDeployment();
 
+        // Deploy NFTLotteryStorage contract
+        NFTLotteryStorage = await ethers.getContractFactory("NFTLotteryStorage");
+        nftLotteryStorage = await NFTLotteryStorage.deploy(await biaToken.getAddress(), await nftContract.getAddress());
+        await nftLotteryStorage.waitForDeployment();
+
         // Deploy NFTLottery contract
         NFTLottery = await ethers.getContractFactory("NFTLottery");
-        nftLottery = await NFTLottery.deploy(
-            await biaToken.getAddress(),
-            await nftContract.getAddress(),
-            seriesANFTs,
-            seriesBNFTs
-        );
+        nftLottery = await NFTLottery.deploy(await nftLotteryStorage.getAddress());
         await nftLottery.waitForDeployment();
+
+        // Set authorized caller
+        await nftLotteryStorage.setAuthorizedCaller(await nftLottery.getAddress());
+
+        // Initialize NFTLottery with series A and B NFTs
+        await initializeNFTs(seriesANFTs, "A");
+        await initializeNFTs(seriesBNFTs, "B");
     });
+
+    async function initializeNFTs(nfts, series) {
+        const batchSize = 50; // Adjust this value as needed
+        for (let i = 0; i < nfts.length; i += batchSize) {
+            const batch = nfts.slice(i, i + batchSize);
+            await nftLottery.initialize(batch, series);
+        }
+    }
 
     describe("Initialization", function () {
         it("Should initialize with correct parameters", async function () {
-            expect(await nftLottery.contractOwner()).to.equal(await owner.getAddress());
-            expect(await nftLottery.totalDraws()).to.equal(0);
-            expect(await nftLottery.currentBiaJackpot()).to.equal(0);
-            expect(await nftLottery.currentEthJackpot()).to.equal(0);
+            expect(await nftLotteryStorage.contractOwner()).to.equal(await owner.getAddress());
+            expect(await nftLotteryStorage.totalDraws()).to.equal(0);
+            expect(await nftLotteryStorage.currentBiaJackpot()).to.equal(0);
+            expect(await nftLotteryStorage.currentEthJackpot()).to.equal(0);
         });
     });
 
@@ -52,12 +67,12 @@ describe("NFTLottery", function () {
         it("Should inject BIA funds correctly", async function () {
             await biaToken.approve(await nftLottery.getAddress(), 1000);
             await nftLottery.injectBIAFunds(1000);
-            expect(await nftLottery.totalBiaFunds()).to.equal(1000);
+            expect(await nftLotteryStorage.totalBiaFunds()).to.equal(1000);
         });
 
         it("Should inject ETH funds correctly", async function () {
             await nftLottery.injectETHFunds({ value: ethers.parseEther("1.0") });
-            expect(await nftLottery.totalEthFunds()).to.equal(ethers.parseEther("1.0"));
+            expect(await nftLotteryStorage.totalEthFunds()).to.equal(ethers.parseEther("1.0"));
         });
     });
 });
