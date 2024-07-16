@@ -11,6 +11,10 @@ contract NFTLottery is ReentrancyGuard {
     event FundsInjected(uint256 biaAmount, uint256 ethAmount);
     event FundsClaimed(address indexed claimer, uint256 amount, string currency);
     event NFTAdded(uint256 id, uint256 rarityScore, string series);
+    event EligibleNFTSelected(uint256 id);
+
+    uint256[] public eligibleNFTs;
+    uint256 public eligibleCount;
 
     constructor(address storageContractAddress) {
         storageContract = NFTLotteryStorage(storageContractAddress);
@@ -129,16 +133,12 @@ contract NFTLottery is ReentrancyGuard {
         storageContract.setFinalizeBlock(block.number + (_combinedRandomNumber() % 20) + 5);
     }
 
-    function selectWinners() public onlyContractOwner {
+    function selectEligibleNFTs(uint256 startIndex, uint256 endIndex) public onlyContractOwner {
         require(storageContract.finalizeBlock() > 0 && block.number >= storageContract.finalizeBlock(), "Cannot select winners yet");
 
-        uint256 finalRandom = _combinedRandomNumber();
         uint256[] memory selectedSeriesNFTIds = storageContract.selectedSeries() == 1 ? storageContract.getSeriesANFTIds() : storageContract.getSeriesBNFTIds();
 
-        uint256[] memory eligibleNFTs = new uint256[](selectedSeriesNFTIds.length);
-        uint256 eligibleCount = 0;
-
-        for (uint256 i = 0; i < selectedSeriesNFTIds.length; i++) {
+        for (uint256 i = startIndex; i < endIndex && i < selectedSeriesNFTIds.length; i++) {
             uint256 id = selectedSeriesNFTIds[i];
             uint256 rarity = storageContract.nftRarityScores(id);
 
@@ -152,12 +152,17 @@ contract NFTLottery is ReentrancyGuard {
             }
 
             if (isEligible && storageContract.nftActiveStatus(id)) {
-                eligibleNFTs[eligibleCount++] = id;
+                eligibleNFTs.push(id);
+                eligibleCount++;
+                emit EligibleNFTSelected(id);
             }
         }
+    }
 
+    function selectWinners() public onlyContractOwner {
         require(eligibleCount > 0, "No eligible NFTs found");
 
+        uint256 finalRandom = _combinedRandomNumber();
         (uint256 jackpotAmount, string memory currency) = _calculateJackpot();
         jackpotAmount = jackpotAmount * storageContract.jackpotPercentage() / 100;
 
@@ -188,6 +193,8 @@ contract NFTLottery is ReentrancyGuard {
 
         emit DrawWinner(winners, jackpotAmount, currency);
 
+        delete eligibleNFTs;
+        eligibleCount = 0;
         storageContract.setTargetBlock(0);
         storageContract.setFinalizeBlock(0);
     }
