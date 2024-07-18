@@ -6,82 +6,82 @@ import "./NFTLotteryStorage.sol";
 contract NFTLottery is ReentrancyGuard {
     NFTLotteryStorage public storageContract;
 
+    // Event emitted when a draw is initialized
     event DrawInitialized(uint256 mode, uint256 numberOfWinners, uint256 jackpotSize, uint256 series, uint256 rarityMode, uint256 threshold);
+    // Event emitted when a draw winner is selected
     event DrawWinner(uint256[] winningNFTs, uint256 prizeAmount, string currency);
+    // Event emitted when funds are injected
     event FundsInjected(uint256 biaAmount, uint256 ethAmount);
+    // Event emitted when funds are claimed
     event FundsClaimed(address indexed claimer, uint256 amount, string currency);
+    // Event emitted when a new NFT is added
     event NFTAdded(uint256 id, uint256 rarityScore, string series);
+    // Event emitted when an eligible NFT is selected
     event EligibleNFTSelected(uint256 id);
 
     uint256[] public eligibleNFTs;
     uint256 public eligibleCount;
 
+    // Constructor to initialize the contract with the storage contract address
     constructor(address storageContractAddress) {
         storageContract = NFTLotteryStorage(storageContractAddress);
     }
 
+    // Modifier to allow only the contract owner to call certain functions
     modifier onlyContractOwner() {
         require(msg.sender == storageContract.contractOwner(), "Not the contract owner");
         _;
     }
 
+    // Modifier to allow only the NFT owner to call certain functions
     modifier onlyNFTOwner(uint256 nftId) {
         require(storageContract.nftContract().ownerOf(nftId) == msg.sender, "Not the owner of the specified NFT");
         _;
     }
 
+    // Function to initialize the lottery with a batch of NFTs and series
     function initialize(NFTLotteryStorage.NFT[] memory batch, string memory series) public onlyContractOwner {
         _addNFTs(batch, series);
     }
 
+    // Internal function to add multiple NFTs to the lottery
     function _addNFTs(NFTLotteryStorage.NFT[] memory batch, string memory series) internal {
         for (uint256 i = 0; i < batch.length; i++) {
             _addNFT(batch[i], series);
         }
     }
 
+    // Internal function to add a single NFT to the lottery
     function _addNFT(NFTLotteryStorage.NFT memory newNFT, string memory series) internal {
         uint256 id = newNFT.id;
         require(!storageContract.nftActiveStatus(id), "NFT already active");
         storageContract.setNFTDetails(id, newNFT.rarityScore, series);
     }
 
+    // Function to add multiple NFTs to the lottery (public)
     function addNFTs(NFTLotteryStorage.NFT[] memory batch, string memory series) public onlyContractOwner {
         _addNFTs(batch, series);
     }
 
+    // Function to inject BIA funds into the lottery
     function injectBIAFunds(uint256 amount) public onlyContractOwner {
         require(amount > 0, "Amount must be greater than zero");
 
         storageContract.setTotalBiaFunds(storageContract.totalBiaFunds() + amount);
         require(storageContract.biaTokenContract().transferFrom(msg.sender, address(storageContract), amount), "BIA transfer failed");
 
-        _updateCurrentBiaJackpot();
-
         emit FundsInjected(amount, 0);
     }
 
+    // Function to inject ETH funds into the lottery
     function injectETHFunds() public payable onlyContractOwner {
         require(msg.value > 0, "Amount must be greater than zero");
         storageContract.setTotalEthFunds(storageContract.totalEthFunds() + msg.value);
 
-        _updateCurrentEthJackpot();
-
         emit FundsInjected(0, msg.value);
     }
 
-    function _updateCurrentBiaJackpot() internal {
-        uint256 W = storageContract.gameMode() == 0 ? 1 : 2;
-        uint256 randomFactor = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % 15000 + 5000;
-        storageContract.setCurrentBiaJackpot((randomFactor * storageContract.totalBiaFunds() * W) / 30000);
-    }
-
-    function _updateCurrentEthJackpot() internal {
-        uint256 W = storageContract.gameMode() == 0 ? 1 : 2;
-        uint256 randomFactor = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % 15000 + 5000;
-        storageContract.setCurrentEthJackpot((randomFactor * storageContract.totalEthFunds() * W) / 30000);
-    }
-
+    // Internal function to generate a combined random number
     function _combinedRandomNumber() internal returns (uint256) {
         uint256 rand1 = uint256(keccak256(abi.encodePacked(blockhash(block.number - 1), block.timestamp)));
         uint256 rand2 = uint256(keccak256(abi.encodePacked(msg.sender, storageContract.randomNonce())));
@@ -92,23 +92,26 @@ contract NFTLottery is ReentrancyGuard {
         return uint256(lastRandomHash);
     }
 
+    // Internal function to calculate the jackpot amount and currency
     function _calculateJackpot() internal view returns (uint256, string memory) {
         uint256 amount;
         string memory currency;
 
         uint256 scaleFactor = 1e18;
+        uint256 randomPercentage = (uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % 16 + 5); // Random percentage between 5% and 20%
 
         if (storageContract.totalDraws() < 6 || storageContract.totalDraws() % 2 == 0) {
             currency = "$BIA";
-            amount = ((uint256(storageContract.lastRandomHash()) % 16 + 5) * storageContract.currentBiaJackpot() * scaleFactor) / 100;
+            amount = (randomPercentage * storageContract.totalBiaFunds()) / 100;
         } else {
             currency = "$ETH";
-            amount = ((uint256(storageContract.lastRandomHash()) % 16 + 5) * storageContract.currentEthJackpot() * scaleFactor) / 100;
+            amount = (randomPercentage * storageContract.totalEthFunds()) / 100;
         }
 
-        return (amount / scaleFactor, currency);
+        return (amount, currency);
     }
 
+    // Function to initialize a draw
     function initializeDraw() public onlyContractOwner {
         require(storageContract.targetBlock() == 0 && storageContract.finalizeBlock() == 0, "A draw is already in progress");
 
@@ -121,18 +124,36 @@ contract NFTLottery is ReentrancyGuard {
         storageContract.setRarityMode(uint8((initialRandom / 64 % 3)));
         storageContract.setRarityThreshold((initialRandom / 128 % (storageContract.maxRarityScore() - storageContract.minRarityScore() + 1)) + storageContract.minRarityScore());
 
+        (uint256 jackpotAmount, string memory currency) = _calculateJackpot();
+        if (keccak256(bytes(currency)) == keccak256(bytes("$BIA"))) {
+            storageContract.setCurrentBiaJackpot(jackpotAmount);
+        } else {
+            storageContract.setCurrentEthJackpot(jackpotAmount);
+        }
+
         storageContract.setTargetBlock(block.number + (initialRandom / 256 % 20) + 5);
 
-        emit DrawInitialized(storageContract.gameMode(), storageContract.winnersCount(), storageContract.jackpotPercentage(), storageContract.selectedSeries(), storageContract.rarityMode(), storageContract.rarityThreshold());
+        emit DrawInitialized(storageContract.gameMode(), storageContract.winnersCount(), jackpotAmount, storageContract.selectedSeries(), storageContract.rarityMode(), storageContract.rarityThreshold());
     }
 
+    // Function to finalize a draw
     function finalizeDraw() public onlyContractOwner {
-        require(storageContract.targetBlock() > 0 && block.number >= storageContract.targetBlock(), "Cannot finalize draw yet");
-        require(storageContract.finalizeBlock() == 0, "Winner selection already in progress");
+        if (storageContract.targetBlock() == 0 || block.number < storageContract.targetBlock()) {
+            storageContract.setTargetBlock(0);
+            storageContract.setFinalizeBlock(0);
+            revert("Cannot finalize draw yet");
+        }
+        if (storageContract.finalizeBlock() != 0) {
+            storageContract.setTargetBlock(0);
+            storageContract.setFinalizeBlock(0);
+            revert("Winner selection already in progress");
+        }
 
-        storageContract.setFinalizeBlock(block.number + (_combinedRandomNumber() % 20) + 5);
+        uint256 newFinalizeBlock = block.number + (_combinedRandomNumber() % 20) + 5;
+        storageContract.setFinalizeBlock(newFinalizeBlock);
     }
 
+    // Function to select eligible NFTs for the draw
     function selectEligibleNFTs(uint256 startIndex, uint256 endIndex) public onlyContractOwner {
         require(storageContract.finalizeBlock() > 0 && block.number >= storageContract.finalizeBlock(), "Cannot select winners yet");
 
@@ -159,32 +180,55 @@ contract NFTLottery is ReentrancyGuard {
         }
     }
 
+    // Function to select winners from eligible NFTs
     function selectWinners() public onlyContractOwner {
-        require(eligibleCount > 0, "No eligible NFTs found");
+        if (eligibleCount == 0) {
+            storageContract.setTargetBlock(0);
+            storageContract.setFinalizeBlock(0);
+            revert("No eligible NFTs found");
+        }
 
         uint256 finalRandom = _combinedRandomNumber();
         (uint256 jackpotAmount, string memory currency) = _calculateJackpot();
         jackpotAmount = jackpotAmount * storageContract.jackpotPercentage() / 100;
 
-        uint256[] memory winners = new uint256[](storageContract.gameMode() == 0 ? 1 : (eligibleCount > storageContract.winnersCount() ? storageContract.winnersCount() : eligibleCount));
+        uint256 numWinners = storageContract.gameMode() == 0 ? 1 : (eligibleCount > storageContract.winnersCount() ? storageContract.winnersCount() : eligibleCount);
+
+        uint256[] memory winners = new uint256[](numWinners);
         uint256 totalJackpotAmount = jackpotAmount * 1e18;
         uint256 prizePerWinner = totalJackpotAmount / winners.length;
 
+        uint256[] memory selectedWinners = new uint256[](eligibleCount);
+        uint256 selectedCount = 0;
+
         for (uint256 i = 0; i < winners.length; i++) {
-            winners[i] = eligibleNFTs[finalRandom % eligibleCount];
-            finalRandom = uint256(keccak256(abi.encodePacked(finalRandom, i)));
+            uint256 winnerId;
+            bool isUnique;
+            do {
+                winnerId = eligibleNFTs[finalRandom % eligibleCount];
+                finalRandom = uint256(keccak256(abi.encodePacked(finalRandom, i)));
+                isUnique = true;
+                for (uint256 j = 0; j < selectedCount; j++) {
+                    if (selectedWinners[j] == winnerId) {
+                        isUnique = false;
+                        break;
+                    }
+                }
+            } while (!isUnique);
+
+            winners[i] = winnerId;
+            selectedWinners[selectedCount] = winnerId;
+            selectedCount++;
         }
 
         if (keccak256(bytes(currency)) == keccak256(bytes("$BIA"))) {
-            require(storageContract.currentBiaJackpot() >= jackpotAmount, "Insufficient BIA in jackpot");
-            storageContract.setCurrentBiaJackpot(storageContract.currentBiaJackpot() - jackpotAmount);
+            require(storageContract.totalBiaFunds() >= jackpotAmount, "Insufficient BIA in total funds");
             storageContract.setTotalBiaFunds(storageContract.totalBiaFunds() - jackpotAmount);
             for (uint256 i = 0; i < winners.length; i++) {
                 storageContract.setBiaPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i]), storageContract.biaPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i])) + prizePerWinner / 1e18);
             }
         } else {
-            require(storageContract.currentEthJackpot() >= jackpotAmount, "Insufficient ETH in jackpot");
-            storageContract.setCurrentEthJackpot(storageContract.currentEthJackpot() - jackpotAmount);
+            require(storageContract.totalEthFunds() >= jackpotAmount, "Insufficient ETH in total funds");
             storageContract.setTotalEthFunds(storageContract.totalEthFunds() - jackpotAmount);
             for (uint256 i = 0; i < winners.length; i++) {
                 storageContract.setEthPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i]), storageContract.ethPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i])) + prizePerWinner / 1e18);
@@ -199,6 +243,7 @@ contract NFTLottery is ReentrancyGuard {
         storageContract.setFinalizeBlock(0);
     }
 
+    // Function to claim funds by NFT owner
     function claimFunds(uint256 nftId) public nonReentrant onlyNFTOwner(nftId) {
         require(storageContract.nftActiveStatus(nftId), "NFT is not active");
 

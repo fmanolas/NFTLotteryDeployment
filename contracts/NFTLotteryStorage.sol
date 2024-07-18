@@ -12,6 +12,7 @@ contract NFTLotteryStorage is ReentrancyGuard {
         string series;
     }
 
+    // State variables
     address public contractOwner;
     address public authorizedCaller;
     IERC20 public biaTokenContract;
@@ -50,6 +51,7 @@ contract NFTLotteryStorage is ReentrancyGuard {
 
     bytes32 public lastRandomHash;
 
+    // Constructor to initialize the contract with BIA token and NFT contract addresses
     constructor(
         address biaTokenAddress,
         address nftContractAddress
@@ -59,25 +61,30 @@ contract NFTLotteryStorage is ReentrancyGuard {
         nftContract = IERC721(nftContractAddress);
     }
 
+    // Modifier to allow only the contract owner to call certain functions
     modifier onlyContractOwner() {
         require(msg.sender == contractOwner, "Not the contract owner");
         _;
     }
 
+    // Modifier to allow only the authorized caller to call certain functions
     modifier onlyAuthorized() {
         require(msg.sender == authorizedCaller, "Not authorized");
         _;
     }
 
+    // Modifier to allow only the NFT owner to call certain functions
     modifier onlyNFTOwner(uint256 nftId) {
         require(nftContract.ownerOf(nftId) == msg.sender, "Not the owner of the specified NFT");
         _;
     }
 
+    // Function to set the authorized caller
     function setAuthorizedCaller(address _authorizedCaller) external onlyContractOwner {
         authorizedCaller = _authorizedCaller;
     }
 
+    // Function to set NFT details
     function setNFTDetails(uint256 id, uint256 rarityScore, string memory series) external onlyAuthorized {
         NFT memory newNFT = NFT({id: id, rarityScore: rarityScore, series: series});
         nftDetails[id] = newNFT;
@@ -93,74 +100,92 @@ contract NFTLotteryStorage is ReentrancyGuard {
         emit NFTAdded(id, rarityScore, series);
     }
 
+    // Function to increment the random nonce
     function incrementRandomNonce() external onlyAuthorized {
         randomNonce++;
     }
 
+    // Function to set the current BIA jackpot value
     function setCurrentBiaJackpot(uint256 value) external onlyAuthorized {
         currentBiaJackpot = value;
     }
 
+    // Function to set the current ETH jackpot value
     function setCurrentEthJackpot(uint256 value) external onlyAuthorized {
         currentEthJackpot = value;
     }
 
+    // Function to set the last random hash value
     function setLastRandomHash(bytes32 value) external onlyAuthorized {
         lastRandomHash = value;
     }
 
+    // Function to set the game mode
     function setGameMode(uint8 value) external onlyAuthorized {
         gameMode = value;
     }
 
+    // Function to set the number of winners
     function setWinnersCount(uint8 value) external onlyAuthorized {
         winnersCount = value;
     }
 
+    // Function to set the jackpot percentage
     function setJackpotPercentage(uint8 value) external onlyAuthorized {
         jackpotPercentage = value;
     }
 
+    // Function to set the selected series
     function setSelectedSeries(uint8 value) external onlyAuthorized {
         selectedSeries = value;
     }
 
+    // Function to set the rarity mode
     function setRarityMode(uint8 value) external onlyAuthorized {
         rarityMode = value;
     }
 
+    // Function to set the rarity threshold
     function setRarityThreshold(uint256 value) external onlyAuthorized {
         rarityThreshold = value;
     }
 
+    // Function to set the target block number
     function setTargetBlock(uint256 value) external onlyAuthorized {
         targetBlock = value;
     }
 
+    // Function to set the finalize block number
     function setFinalizeBlock(uint256 value) external onlyAuthorized {
         finalizeBlock = value;
     }
 
+    // Function to set the total BIA funds
     function setTotalBiaFunds(uint256 value) external onlyAuthorized {
         totalBiaFunds = value;
     }
 
+    // Function to set the total ETH funds
     function setTotalEthFunds(uint256 value) external onlyAuthorized {
         totalEthFunds = value;
     }
 
+    // Function to set the BIA pending withdrawals for a user
     function setBiaPendingWithdrawals(address user, uint256 value) external onlyAuthorized {
         biaPendingWithdrawals[user] = value;
     }
 
+    // Function to set the ETH pending withdrawals for a user
     function setEthPendingWithdrawals(address user, uint256 value) external onlyAuthorized {
         ethPendingWithdrawals[user] = value;
     }
 
+    // Function to get the NFT IDs for series A
     function getSeriesANFTIds() external view returns (uint256[] memory) {
         return seriesANFTIds;
     }
 
+    // Function to get the NFT IDs for series B
     function getSeriesBNFTIds() external view returns (uint256[] memory) {
         return seriesBNFTIds;
     }
