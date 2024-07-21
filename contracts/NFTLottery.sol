@@ -181,88 +181,99 @@ contract NFTLottery is ReentrancyGuard {
     }
 
     // Function to select winners from eligible NFTs
-    function selectWinners() public onlyContractOwner {
-        if (eligibleCount == 0) {
-            storageContract.setTargetBlock(0);
-            storageContract.setFinalizeBlock(0);
-            revert("No eligible NFTs found");
-        }
-
-        uint256 finalRandom = _combinedRandomNumber();
-        (uint256 jackpotAmount, string memory currency) = _calculateJackpot();
-        jackpotAmount = jackpotAmount * storageContract.jackpotPercentage() / 100;
-
-        uint256 numWinners = storageContract.gameMode() == 0 ? 1 : (eligibleCount > storageContract.winnersCount() ? storageContract.winnersCount() : eligibleCount);
-
-        uint256[] memory winners = new uint256[](numWinners);
-        uint256 totalJackpotAmount = jackpotAmount * 1e18;
-        uint256 prizePerWinner = totalJackpotAmount / winners.length;
-
-        uint256[] memory selectedWinners = new uint256[](eligibleCount);
-        uint256 selectedCount = 0;
-
-        for (uint256 i = 0; i < winners.length; i++) {
-            uint256 winnerId;
-            bool isUnique;
-            do {
-                winnerId = eligibleNFTs[finalRandom % eligibleCount];
-                finalRandom = uint256(keccak256(abi.encodePacked(finalRandom, i)));
-                isUnique = true;
-                for (uint256 j = 0; j < selectedCount; j++) {
-                    if (selectedWinners[j] == winnerId) {
-                        isUnique = false;
-                        break;
-                    }
-                }
-            } while (!isUnique);
-
-            winners[i] = winnerId;
-            selectedWinners[selectedCount] = winnerId;
-            selectedCount++;
-        }
-
-        if (keccak256(bytes(currency)) == keccak256(bytes("$BIA"))) {
-            require(storageContract.totalBiaFunds() >= jackpotAmount, "Insufficient BIA in total funds");
-            storageContract.setTotalBiaFunds(storageContract.totalBiaFunds() - jackpotAmount);
-            for (uint256 i = 0; i < winners.length; i++) {
-                storageContract.setBiaPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i]), storageContract.biaPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i])) + prizePerWinner / 1e18);
-            }
-        } else {
-            require(storageContract.totalEthFunds() >= jackpotAmount, "Insufficient ETH in total funds");
-            storageContract.setTotalEthFunds(storageContract.totalEthFunds() - jackpotAmount);
-            for (uint256 i = 0; i < winners.length; i++) {
-                storageContract.setEthPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i]), storageContract.ethPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i])) + prizePerWinner / 1e18);
-            }
-        }
-
-        emit DrawWinner(winners, jackpotAmount, currency);
-
-        delete eligibleNFTs;
-        eligibleCount = 0;
+function selectWinners() public onlyContractOwner {
+    if (eligibleCount == 0) {
         storageContract.setTargetBlock(0);
         storageContract.setFinalizeBlock(0);
+        revert("No eligible NFTs found");
     }
+
+    uint256 finalRandom = _combinedRandomNumber();
+    (uint256 jackpotAmount, string memory currency) = _calculateJackpot();
+    jackpotAmount = jackpotAmount * storageContract.jackpotPercentage() / 100;
+
+    uint256 numWinners = storageContract.gameMode() == 0 ? 1 : (eligibleCount > storageContract.winnersCount() ? storageContract.winnersCount() : eligibleCount);
+
+    uint256[] memory winners = new uint256[](numWinners);
+    uint256 totalJackpotAmount = jackpotAmount * 1e18;
+    uint256 prizePerWinner = totalJackpotAmount / winners.length;
+
+    uint256[] memory currentEligibleNFTs = new uint256[](eligibleCount);
+    for (uint256 i = 0; i < eligibleCount; i++) {
+        currentEligibleNFTs[i] = eligibleNFTs[i];
+    }
+
+    // Clear previous eligible NFTs list
+    delete eligibleNFTs;
+    eligibleCount = 0;
+
+    bool[] memory selected = new bool[](currentEligibleNFTs.length);
+    uint256 selectedCount = 0;
+
+    while (selectedCount < numWinners) {
+        uint256 winnerIndex = finalRandom % currentEligibleNFTs.length;
+        uint256 winnerId = currentEligibleNFTs[winnerIndex];
+
+        if (!selected[winnerIndex]) {
+            selected[winnerIndex] = true;
+            winners[selectedCount] = winnerId;
+            eligibleNFTs.push(winnerId);
+            eligibleCount++;
+            selectedCount++;
+        }
+        finalRandom = uint256(keccak256(abi.encodePacked(finalRandom, selectedCount)));
+    }
+
+    if (keccak256(bytes(currency)) == keccak256(bytes("$BIA"))) {
+        require(storageContract.totalBiaFunds() >= jackpotAmount, "Insufficient BIA in total funds");
+        storageContract.setTotalBiaFunds(storageContract.totalBiaFunds() - jackpotAmount);
+        for (uint256 i = 0; i < winners.length; i++) {
+            storageContract.setBiaPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i]), storageContract.biaPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i])) + prizePerWinner / 1e18);
+        }
+    } else {
+        require(storageContract.totalEthFunds() >= jackpotAmount, "Insufficient ETH in total funds");
+        storageContract.setTotalEthFunds(storageContract.totalEthFunds() - jackpotAmount);
+        for (uint256 i = 0; i < winners.length; i++) {
+            storageContract.setEthPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i]), storageContract.ethPendingWithdrawals(storageContract.nftContract().ownerOf(winners[i])) + prizePerWinner / 1e18);
+        }
+    }
+
+    emit DrawWinner(winners, jackpotAmount, currency);
+
+    storageContract.setTargetBlock(0);
+    storageContract.setFinalizeBlock(0);
+}
+
+
+
 
     // Function to claim funds by NFT owner
     function claimFunds(uint256 nftId) public nonReentrant onlyNFTOwner(nftId) {
-        require(storageContract.nftActiveStatus(nftId), "NFT is not active");
+    require(storageContract.nftActiveStatus(nftId), "NFT is not active");
 
-        uint256 biaAmount = storageContract.biaPendingWithdrawals(msg.sender);
-        uint256 ethAmount = storageContract.ethPendingWithdrawals(msg.sender);
+    uint256 biaAmount = storageContract.biaPendingWithdrawals(msg.sender);
+    uint256 ethAmount = storageContract.ethPendingWithdrawals(msg.sender);
 
-        require(biaAmount > 0 || ethAmount > 0, "No funds to claim");
+    require(biaAmount > 0 || ethAmount > 0, "No funds to claim");
 
-        if (biaAmount > 0) {
-            storageContract.setBiaPendingWithdrawals(msg.sender, 0);
-            require(storageContract.biaTokenContract().transfer(msg.sender, biaAmount), "BIA transfer failed");
-            emit FundsClaimed(msg.sender, biaAmount, "$BIA");
-        }
+    if (biaAmount > 0) {
+        storageContract.setBiaPendingWithdrawals(msg.sender, 0);
 
-        if (ethAmount > 0) {
-            storageContract.setEthPendingWithdrawals(msg.sender, 0);
-            (bool success, ) = msg.sender.call{value: ethAmount}("");
-            require(success, "ETH transfer failed");
-            emit FundsClaimed(msg.sender, ethAmount, "$ETH");
-        }
+        // Ensure NFTLottery contract has enough allowance to transfer BIA tokens
+        require(storageContract.biaTokenContract().allowance(address(storageContract), address(this)) >= biaAmount, "Insufficient BIA allowance");
+        require(storageContract.biaTokenContract().transferFrom(address(storageContract), msg.sender, biaAmount), "BIA transfer failed");
+        emit FundsClaimed(msg.sender, biaAmount, "$BIA");
     }
+
+    if (ethAmount > 0) {
+        storageContract.setEthPendingWithdrawals(msg.sender, 0);
+        (bool success, ) = msg.sender.call{value: ethAmount}("");
+        require(success, "ETH transfer failed");
+        emit FundsClaimed(msg.sender, ethAmount, "$ETH");
+    }
+}
+
+function approveBiaTransferFromStorage(uint256 amount) external onlyContractOwner {
+    storageContract.approveBiaTransfer(address(this), amount);
+}
 }

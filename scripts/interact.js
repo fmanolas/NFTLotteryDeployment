@@ -5,8 +5,8 @@ async function main() {
     const [deployer] = await ethers.getSigners();
     console.log("Interacting with the contracts using account:", await deployer.getAddress());
 
-    const NFTLotteryStorageAddress = "0x2221f857119caaaCA524Dd1f45AC9C7562744d23";
-    const NFTLotteryAddress = "0xb47194E220c121e8FE79ABAffC0C06c7f4333706";
+    const NFTLotteryStorageAddress = "0xe8E497a1bFE89f384C77Ee5fBcd304f9b3025394";
+    const NFTLotteryAddress = "0x2DD0de0Ba699ce21570a14730A8B0C1E0725E58E";
     const NFTContractAddress = "0xE63198b621EC3628d9a320944355D74E0De81E63";
 
     const NFTLotteryStorage = await ethers.getContractAt("NFTLotteryStorage", NFTLotteryStorageAddress);
@@ -14,7 +14,7 @@ async function main() {
     const NFTContract = await ethers.getContractAt("IERC721", NFTContractAddress);
     const BiaToken = await ethers.getContractAt("IERC20", process.env.BIA_TOKEN_ADDRESS);
 
-    await NFTLotteryStorage.setAuthorizedCaller(await NFTLottery.getAddress());
+    await NFTLotteryStorage.setAuthorizedCaller(NFTLotteryAddress);
 
     const biaTokenBalance = await BiaToken.balanceOf(NFTLotteryStorageAddress);
     console.log("BIA Token Balance in contract:", ethers.formatUnits(biaTokenBalance, 18));
@@ -51,15 +51,22 @@ async function main() {
             currentBlock = await ethers.provider.getBlockNumber();
         }
 
-        const finalizeTx = await NFTLottery.finalizeDraw();
-        await finalizeTx.wait();
-        console.log("Draw finalized.");
+        if (await NFTLotteryStorage.targetBlock() > 0 && currentBlock >= targetBlock) {
+            try {
+                const finalizeTx = await NFTLottery.finalizeDraw();
+                await finalizeTx.wait();
+                console.log("Draw finalized.");
+            } catch (error) {
+                console.error("Error finalizing draw:", error);
+            }
+        } else {
+            console.log("Draw is not ready to be finalized.");
+        }
     } catch (error) {
         console.error("Error finalizing draw:", error);
     }
 
     try {
-        console.log(finalizeBlock);
         let currentBlock = await ethers.provider.getBlockNumber();
         while (currentBlock.toString() < finalizeBlock.toString()) {
             console.log(`Current Block: ${currentBlock}, waiting for Finalize Block: ${finalizeBlock}...`);
@@ -67,9 +74,17 @@ async function main() {
             currentBlock = await ethers.provider.getBlockNumber();
         }
 
-        const selectEligibleTx = await NFTLottery.selectEligibleNFTs(0, 10);
-        await selectEligibleTx.wait();
-        console.log("Eligible NFTs selected.");
+        if (await NFTLotteryStorage.finalizeBlock() > 0 && currentBlock >= finalizeBlock) {
+            try {
+                const selectEligibleTx = await NFTLottery.selectEligibleNFTs(0, 10);
+                await selectEligibleTx.wait();
+                console.log("Eligible NFTs selected.");
+            } catch (error) {
+                console.error("Error selecting eligible NFTs:", error);
+            }
+        } else {
+            console.log("Not ready to select eligible NFTs.");
+        }
     } catch (error) {
         console.error("Error selecting eligible NFTs:", error);
     }
@@ -77,14 +92,14 @@ async function main() {
     try {
         const eligibleNFTCount = await NFTLottery.eligibleCount();
         console.log("Eligible NFTs count:", eligibleNFTCount.toString());
-    } catch (error) {
-        console.error("Error retrieving eligible NFTs:", error);
-    }
 
-    try {
-        const selectWinnersTx = await NFTLottery.selectWinners();
-        await selectWinnersTx.wait();
-        console.log("Winners selected.");
+        if (eligibleNFTCount > 0) {
+            const selectWinnersTx = await NFTLottery.selectWinners();
+            await selectWinnersTx.wait();
+            console.log("Winners selected.");
+        } else {
+            console.log("No eligible NFTs to select winners from.");
+        }
     } catch (error) {
         console.error("Error selecting winners:", error);
     }
@@ -108,13 +123,23 @@ async function main() {
 
     const amountToInject = ethers.parseUnits("1000000", 18);
 
-    const approveTx = await BiaToken.approve(NFTLotteryAddress, amountToInject);
-    await approveTx.wait();
-    console.log("BIA token allowance approved.");
+    try {
+        const approveInjectTx = await BiaToken.approve(NFTLotteryAddress, amountToInject);
+        await approveInjectTx.wait();
+        console.log("BIA token allowance approved for NFTLottery to inject funds.");
+    } catch (error) {
+        console.error("Error approving BIA token allowance for injection:", error);
+        return;
+    }
 
-    const injectTx = await NFTLottery.injectBIAFunds(amountToInject);
-    await injectTx.wait();
-    console.log("BIA funds injected.");
+    try {
+        const injectTx = await NFTLottery.injectBIAFunds(amountToInject);
+        await injectTx.wait();
+        console.log("BIA funds injected.");
+    } catch (error) {
+        console.error("Error injecting BIA funds:", error);
+        return;
+    }
 
     try {
         const currentBiaJackpot = await NFTLotteryStorage.currentBiaJackpot();
@@ -131,18 +156,27 @@ async function main() {
     }
 
     try {
-        const biaPendingWithdrawals = await NFTLotteryStorage.biaPendingWithdrawals("0x49A1c5562FBe1E6cA689Af75d429Bc2dCacbb223");
+        const biaPendingWithdrawals = await NFTLotteryStorage.biaPendingWithdrawals(deployer.address);
         console.log("BIA Pending Withdrawals for deployer:", ethers.formatUnits(biaPendingWithdrawals, 18));
 
-        const ethPendingWithdrawals = await NFTLotteryStorage.ethPendingWithdrawals("0x49A1c5562FBe1E6cA689Af75d429Bc2dCacbb223");
+        const ethPendingWithdrawals = await NFTLotteryStorage.ethPendingWithdrawals(deployer.address);
         console.log("ETH Pending Withdrawals for deployer:", ethers.formatUnits(ethPendingWithdrawals, 18));
 
-        if (biaTokenBalance < biaPendingWithdrawals) {
+        if (biaTokenBalance.toString() < biaPendingWithdrawals.toString()) {
             console.error("Contract does not have enough BIA tokens to cover the pending withdrawals.");
             return;
         }
     } catch (error) {
         console.error("Error getting pending withdrawals:", error);
+    }
+
+    try {
+        const totalBiaFunds = await NFTLotteryStorage.totalBiaFunds();
+        const approveTotalFundsTx = await NFTLottery.approveBiaTransferFromStorage(totalBiaFunds);
+        await approveTotalFundsTx.wait();
+        console.log("Allowance set for NFTLottery contract to spend from storage contract.");
+    } catch (error) {
+        console.error("Error setting BIA token allowance:", error);
     }
 
     try {
@@ -153,9 +187,6 @@ async function main() {
         for (const nftId of winningNFTs) {
             const nftOwner = await NFTContract.ownerOf(nftId);
             console.log(`Owner of NFT ID ${nftId}:`, nftOwner);
-
-            const nftOwnerSigner = await ethers.provider.getSigner(nftOwner);
-            const NFTLotteryAsOwner = NFTLottery.connect(nftOwnerSigner);
 
             const biaBalanceBefore = await BiaToken.balanceOf(nftOwner);
             console.log(`BIA Balance of owner before claim for NFT ID ${nftId}:`, ethers.formatUnits(biaBalanceBefore, 18));
@@ -169,20 +200,33 @@ async function main() {
             const contractAllowance = await BiaToken.allowance(NFTLotteryStorageAddress, NFTLotteryAddress);
             console.log(`Contract BIA Allowance for NFTLottery contract:`, ethers.formatUnits(contractAllowance, 18));
 
-                const approveTx = await BiaToken.connect(deployer).approve(NFTLotteryAddress, pendingWithdrawals);
-                await approveTx.wait();
-                console.log(`Allowance set for NFTLottery contract to spend from storage contract for NFT ID ${nftId}`);
-            
+            if (contractAllowance.toString() < pendingWithdrawals.toString()) {
+                try {
+                    const approvePendingTx = await NFTLottery.approveBiaTransferFromStorage(pendingWithdrawals);
+                    await approvePendingTx.wait();
+                    console.log(`Allowance set for NFTLottery contract to spend from storage contract for NFT ID ${nftId}`);
+                } catch (error) {
+                    console.error(`Error setting BIA token allowance for NFT ID ${nftId}:`, error);
+                    continue;
+                }
+            }
 
-            const claimFundsTx = await NFTLotteryAsOwner.claimFunds(nftId);
-            await claimFundsTx.wait();
-            console.log(`Funds claimed for NFT ID: ${nftId}`);
+            try {
+                const nftOwnerSigner = await ethers.getSigner(nftOwner);
+                const NFTLotteryAsOwner = NFTLottery.connect(nftOwnerSigner);
 
-            const biaBalanceAfter = await BiaToken.balanceOf(nftOwner);
-            console.log(`BIA Balance of owner after claim for NFT ID ${nftId}:`, ethers.formatUnits(biaBalanceAfter, 18));
+                const claimFundsTx = await NFTLotteryAsOwner.claimFunds(nftId);
+                await claimFundsTx.wait();
+                console.log(`Funds claimed for NFT ID: ${nftId}`);
 
-            const contractBiaBalanceAfter = await BiaToken.balanceOf(NFTLotteryStorageAddress);
-            console.log(`Contract BIA Balance after claim for NFT ID ${nftId}:`, ethers.formatUnits(contractBiaBalanceAfter, 18));
+                const biaBalanceAfter = await BiaToken.balanceOf(nftOwner);
+                console.log(`BIA Balance of owner after claim for NFT ID ${nftId}:`, ethers.formatUnits(biaBalanceAfter, 18));
+
+                const contractBiaBalanceAfter = await BiaToken.balanceOf(NFTLotteryStorageAddress);
+                console.log(`Contract BIA Balance after claim for NFT ID ${nftId}:`, ethers.formatUnits(contractBiaBalanceAfter, 18));
+            } catch (error) {
+                console.error(`Error claiming funds for NFT ID ${nftId}:`, error);
+            }
         }
     } catch (error) {
         console.error("Error claiming funds:", error);

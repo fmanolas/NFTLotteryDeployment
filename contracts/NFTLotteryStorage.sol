@@ -189,4 +189,9 @@ contract NFTLotteryStorage is ReentrancyGuard {
     function getSeriesBNFTIds() external view returns (uint256[] memory) {
         return seriesBNFTIds;
     }
+
+    function approveBiaTransfer(address spender, uint256 amount) external onlyAuthorized {
+    require(biaTokenContract.approve(spender, amount), "BIA approve failed");
+}
+
 }
